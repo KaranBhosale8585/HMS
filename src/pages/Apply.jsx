@@ -44,7 +44,6 @@ const Apply = () => {
         body: submitData,
       });
 
-
       const result = await response.json();
 
       if (response.ok) {

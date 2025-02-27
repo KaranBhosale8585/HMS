@@ -1,16 +1,20 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import mysql from "mysql2/promise";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import connectDB from "./db.js";
+import mongoose from "mongoose";
 
 // Load environment variables
 dotenv.config();
+
+// ✅ Connect to MongoDB
+connectDB();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -19,13 +23,26 @@ const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret";
 // ✅ Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+
+// ✅ CORS Configuration (Fix)
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174", // Allow multiple frontend origins
+];
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
   })
 );
-app.use(cookieParser());
 
 // ✅ Ensure uploads directory exists
 const uploadDir = process.env.UPLOADS_DIR || "uploads";
@@ -39,20 +56,20 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// ✅ MySQL Database Connection Pool
-const db = await mysql.createPool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  waitForConnections: true,
-  connectionLimit: 10,
+// ✅ User Schema & Model
+const userSchema = new mongoose.Schema({
+  name: String,
+  email: { type: String, unique: true },
+  password: String,
+  isAdmin: { type: Boolean, default: false },
 });
+
+const User = mongoose.model("User", userSchema);
 
 // ✅ JWT Helper Function
 const generateToken = (user) => {
   return jwt.sign(
-    { id: user.id, email: user.email, isAdmin: user.isAdmin },
+    { id: user._id, email: user.email, isAdmin: user.isAdmin },
     JWT_SECRET,
     { expiresIn: "7d" }
   );
@@ -68,21 +85,16 @@ app.post("/auth/signup", async (req, res) => {
     const { name, email, password } = req.body;
 
     // Check if email already exists
-    const [existingUser] = await db.execute(
-      "SELECT * FROM users WHERE email = ?",
-      [email]
-    );
-    if (existingUser.length > 0)
+    const existingUser = await User.findOne({ email });
+    if (existingUser)
       return res.status(400).json({ message: "Email already in use" });
 
     // Hash Password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Insert New User
-    await db.execute(
-      "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
-      [name, email, hashedPassword]
-    );
+    // Create New User
+    const newUser = new User({ name, email, password: hashedPassword });
+    await newUser.save();
 
     res.status(201).json({ message: "User registered successfully" });
   } catch (error) {
@@ -97,13 +109,9 @@ app.post("/auth/login", async (req, res) => {
     const { email, password } = req.body;
 
     // Check if user exists
-    const [users] = await db.execute("SELECT * FROM users WHERE email = ?", [
-      email,
-    ]);
-    if (users.length === 0)
+    const user = await User.findOne({ email });
+    if (!user)
       return res.status(401).json({ message: "Invalid email or password" });
-
-    const user = users[0];
 
     // Compare Password
     const isMatch = await bcrypt.compare(password, user.password);
@@ -122,7 +130,7 @@ app.post("/auth/login", async (req, res) => {
 
     res.json({
       message: "Login successful",
-      user: { id: user.id, email: user.email, isAdmin: user.isAdmin },
+      user: { id: user._id, email: user.email, isAdmin: user.isAdmin },
     });
   } catch (error) {
     console.error("Login Error:", error);
@@ -140,118 +148,78 @@ app.post("/auth/logout", (req, res) => {
 /* 🚀 HOSTEL APPLICATION FORM 🚀 */
 /* =============================== */
 
+const applicationSchema = new mongoose.Schema({
+  fullName: String,
+  gender: String,
+  dob: String,
+  contactNumber: String,
+  email: String,
+  address: String,
+  course: String,
+  guardianName: String,
+  guardianContact: String,
+  roomPreference: String,
+  documentPath: String,
+  role: { type: String, default: "user" },
+});
+
+const Application = mongoose.model("Application", applicationSchema);
+
 app.post("/apply", upload.single("documents"), async (req, res) => {
   try {
-    const {
-      fullName,
-      gender,
-      dob,
-      contactNumber,
-      email,
-      address,
-      course,
-      guardianName,
-      guardianContact,
-      roomPreference,
-    } = req.body;
-    const documentPath = req.file ? req.file.path : null;
-    const role = "user"; // Default role
-
-    if (
-      !fullName ||
-      !gender ||
-      !dob ||
-      !contactNumber ||
-      !email ||
-      !address ||
-      !course ||
-      !guardianName ||
-      !guardianContact ||
-      !roomPreference
-    ) {
-      return res.status(400).json({ error: "All fields are required!" });
-    }
-
-    const [result] = await db.execute(
-      `INSERT INTO applications (fullName, gender, dob, contactNumber, email, address, course, guardianName, guardianContact, roomPreference, documentPath, role) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        fullName,
-        gender,
-        dob,
-        contactNumber,
-        email,
-        address,
-        course,
-        guardianName,
-        guardianContact,
-        roomPreference,
-        documentPath,
-        role,
-      ]
-    );
-
-    res.json({
-      message: "✅ Application submitted successfully!",
-      id: result.insertId,
+    const newApplication = new Application({
+      ...req.body,
+      documentPath: req.file ? req.file.path : null,
     });
+    await newApplication.save();
+    res.json({ message: "✅ Application submitted successfully!" });
   } catch (error) {
     console.error("❌ Database Error:", error);
     res.status(500).json({ error: "Database error" });
   }
 });
 
-
 /* =============================== */
 /* 🚀 COMPLAINTS API 🚀 */
 /* =============================== */
 
-app.post("/api/complaints", async (req, res) => {
-  const { name, email, complaintType, description } = req.body;
-
-  if (!name || !email || !complaintType || !description) {
-    return res.status(400).json({ message: "All fields are required." });
-  }
-
-  try {
-    const [result] = await db.execute(
-      "INSERT INTO complaints (name, email, complaintType, description) VALUES (?, ?, ?, ?)",
-      [name, email, complaintType, description]
-    );
-
-    if (result.affectedRows > 0) {
-      return res
-        .status(201)
-        .json({ message: "Complaint submitted successfully!" });
-    } else {
-      return res.status(500).json({ message: "Failed to submit complaint." });
-    }
-  } catch (error) {
-    console.error("Database Error:", error);
-    return res.status(500).json({ message: "Internal Server Error" });
-  }
+const complaintSchema = new mongoose.Schema({
+  name: String,
+  email: String,
+  complaintType: String,
+  description: String,
 });
 
+const Complaint = mongoose.model("Complaint", complaintSchema);
+
+app.post("/api/complaints", async (req, res) => {
+  try {
+    const newComplaint = new Complaint(req.body);
+    await newComplaint.save();
+    res.status(201).json({ message: "Complaint submitted successfully!" });
+  } catch (error) {
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+});
 
 /* =============================== */
 /* 🚀 CONTACT FORM API 🚀 */
 /* =============================== */
 
+const contactSchema = new mongoose.Schema({
+  name: String,
+  email: String,
+  message: String,
+});
+
+const Contact = mongoose.model("Contact", contactSchema);
+
 app.post("/api/contact", async (req, res) => {
-  const { name, email, message } = req.body;
-
-  if (!name || !email || !message) {
-    return res.status(400).json({ error: "All fields are required!" });
-  }
-
   try {
-    const [result] = await db.execute(
-      "INSERT INTO contacts (name, email, message) VALUES (?, ?, ?)",
-      [name, email, message]
-    );
-    res.json({ message: "✅ Message sent successfully!", id: result.insertId });
+    const newContact = new Contact(req.body);
+    await newContact.save();
+    res.json({ message: "✅ Message sent successfully!" });
   } catch (error) {
-    console.error("❌ Database Error:", error);
     res.status(500).json({ error: "Database error" });
   }
 });
@@ -260,21 +228,27 @@ app.post("/api/contact", async (req, res) => {
 /* 🚀 EVENT REGISTRATION SYSTEM 🚀 */
 /* =============================== */
 
+const eventRegistrationSchema = new mongoose.Schema({
+  fullName: String,
+  email: String,
+  phone: String,
+  gender: String,
+  eventType: String,
+  comment: String,
+  createdAt: { type: Date, default: Date.now },
+});
+
+const EventRegistration = mongoose.model(
+  "EventRegistration",
+  eventRegistrationSchema
+);
+
 app.post("/register-event", async (req, res) => {
-  const { fullName, email, phone, gender, eventType, comment } = req.body;
-
-  if (!fullName || !email || !phone || !gender || !eventType) {
-    return res.status(400).json({ error: "All fields are required!" });
-  }
-
   try {
-    const [result] = await db.execute(
-      "INSERT INTO event_registrations (fullName, email, phone, gender, eventType, comment) VALUES (?, ?, ?, ?, ?, ?)",
-      [fullName, email, phone, gender, eventType, comment]
-    );
-    res.json({ message: "✅ Registration Successful!", id: result.insertId });
+    const newRegistration = new EventRegistration(req.body);
+    await newRegistration.save();
+    res.json({ message: "✅ Registration Successful!" });
   } catch (error) {
-    console.error("❌ Database Error:", error);
     res.status(500).json({ error: "Database error" });
   }
 });
@@ -282,9 +256,7 @@ app.post("/register-event", async (req, res) => {
 // ✅ Fetch All Event Registrations
 app.get("/events", async (req, res) => {
   try {
-    const [events] = await db.execute(
-      "SELECT * FROM event_registrations ORDER BY created_at DESC"
-    );
+    const events = await EventRegistration.find().sort({ createdAt: -1 });
     res.json(events);
   } catch (error) {
     res.status(500).json({ error: "Database error" });
