@@ -7,10 +7,10 @@ import cookieParser from "cookie-parser";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import mongoose from "mongoose";
 import connectDB from "./db.js";
+import mongoose from "mongoose";
 
-// ✅ Load environment variables
+// Load environment variables
 dotenv.config();
 
 // ✅ Connect to MongoDB
@@ -25,11 +25,10 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// ✅ CORS Configuration
+// ✅ CORS Configuration (Fix)
 const allowedOrigins = [
   "http://localhost:5173",
-  "http://localhost:5174", // Add multiple frontend origins if needed
-  process.env.CLIENT_URL, // Use env for production frontend
+  "http://localhost:5174", // Allow multiple frontend origins
 ];
 
 app.use(
@@ -84,12 +83,16 @@ const generateToken = (user) => {
 app.post("/auth/signup", async (req, res) => {
   try {
     const { name, email, password } = req.body;
-    const existingUser = await User.findOne({ email });
 
+    // Check if email already exists
+    const existingUser = await User.findOne({ email });
     if (existingUser)
       return res.status(400).json({ message: "Email already in use" });
 
+    // Hash Password
     const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create New User
     const newUser = new User({ name, email, password: hashedPassword });
     await newUser.save();
 
@@ -104,13 +107,21 @@ app.post("/auth/signup", async (req, res) => {
 app.post("/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await User.findOne({ email });
 
-    if (!user || !(await bcrypt.compare(password, user.password)))
+    // Check if user exists
+    const user = await User.findOne({ email });
+    if (!user)
       return res.status(401).json({ message: "Invalid email or password" });
 
+    // Compare Password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch)
+      return res.status(401).json({ message: "Invalid email or password" });
+
+    // Generate JWT Token
     const token = generateToken(user);
 
+    // Send Token in Cookie
     res.cookie("token", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
