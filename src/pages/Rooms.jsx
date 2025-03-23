@@ -1,4 +1,5 @@
 import React from "react";
+import { Link } from "react-router-dom";
 
 const roomsData = [
   {
@@ -72,12 +73,12 @@ const RoomCard = ({ room }) => {
         ))}
       </ul>
       <p className="text-lg font-semibold text-blue-500">{room.price}</p>
-      <a
-        href="/apply"
+      <Link
+            to="/apply"
         className="mt-4 inline-block bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 dark:hover:bg-blue-500 transition"
       >
         Apply Now
-      </a>
+      </Link>
     </div>
   );
 };

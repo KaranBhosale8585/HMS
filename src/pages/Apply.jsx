@@ -19,6 +19,22 @@ const Apply = () => {
   const [fileName, setFileName] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // ✅ Validate if user is 18 or older
+  const validateAge = (dob) => {
+    const birthDate = new Date(dob);
+    const today = new Date();
+    const age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    const dayDiff = today.getDate() - birthDate.getDate();
+
+    // Check if the birthday hasn't occurred yet this year
+    if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
+      return age - 1;
+    }
+
+    return age;
+  };
+
   const handleChange = (e) => {
     const { name, value, type, files } = e.target;
     if (type === "file" && files.length > 0) {
@@ -31,6 +47,14 @@ const Apply = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // ✅ Check if age is 18 or above
+    const userAge = validateAge(formData.dob);
+    if (userAge < 18) {
+      toast.error("You must be at least 18 years old to apply for the hostel.");
+      return; // Stop form submission if age is invalid
+    }
+
     setLoading(true);
     const submitData = new FormData();
 
@@ -80,6 +104,7 @@ const Apply = () => {
         </h2>
 
         <form onSubmit={handleSubmit} className="grid gap-5">
+          {/* Render Input Fields */}
           {[
             "fullName",
             "dob",
@@ -109,6 +134,7 @@ const Apply = () => {
             </div>
           ))}
 
+          {/* Gender Dropdown */}
           <div className="flex flex-col">
             <label className="font-medium text-gray-700 dark:text-gray-300">
               Gender:
@@ -127,6 +153,7 @@ const Apply = () => {
             </select>
           </div>
 
+          {/* Room Preference Dropdown */}
           <div className="flex flex-col">
             <label className="font-medium text-gray-700 dark:text-gray-300">
               Room Preference:
@@ -145,6 +172,7 @@ const Apply = () => {
             </select>
           </div>
 
+          {/* Upload Documents */}
           <div className="flex flex-col">
             <label className="font-medium text-gray-700 dark:text-gray-300">
               Upload Documents:
@@ -164,6 +192,7 @@ const Apply = () => {
             )}
           </div>
 
+          {/* Submit Button */}
           <button
             type="submit"
             className="bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 transition flex justify-center disabled:opacity-50 disabled:cursor-not-allowed"
